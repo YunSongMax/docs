@@ -4,7 +4,7 @@ icon: Share2
 description: Share your conversations with others using LibreChat's shareable links feature, complete with QR codes, branching messages, and artifacts support.
 ---
 
-Shareable links let you publish a read-only snapshot of a conversation that others can open through a generated URL or QR code. Recipients see the messages, any branches, and any artifacts you generated, without being able to reply or change anything.
+Shareable links let you publish a read-only snapshot of a conversation that others can open through a generated URL or QR code. Recipients see the messages, any branches, and any artifacts you generated, without being able to reply or change anything in the shared view. Signed-in recipients can continue the conversation in a personal copy of their own.
 
 ## Key Features
 
@@ -13,6 +13,7 @@ Shareable links let you publish a read-only snapshot of a conversation that othe
 - **Branching**: Shared links keep every branch of the conversation.
 - **Artifacts**: React components, HTML previews, and Mermaid diagrams stay interactive.
 - **File snapshots**: Referenced conversation files can be previewed or downloaded from the shared link without granting recipients access to the owner's live file ACL.
+- **Continue this chat**: Signed-in viewers can copy the conversation into their own account and keep chatting.
 - **Recipient preferences**: Viewers can switch language and theme.
 - **Link management**: One dashboard to review or revoke every link you've created.
 
@@ -69,6 +70,18 @@ QR codes are handy for presentations, quick mobile access, printed handouts, and
 When someone opens your link, they see a focused, read-only view of the conversation, including the date the link was published, the full message history, and any artifacts you generated.
 
 ![A shared conversation as a recipient sees it](/images/shared-links/shared-view.png)
+
+## Continue a Shared Conversation
+
+Recipients who are signed in can select **Continue this chat** in the shared view's header. LibreChat copies the conversation into the recipient's own account and opens it as a new chat, where they can send messages and get responses like in any other conversation.
+
+- **Active branch only**: The copy follows the branch the recipient is currently viewing, from the first message to the last one on that path.
+- **Independent copies**: The copy belongs to the recipient. Messages they send never appear in your conversation or in the shared link, and later changes to your conversation do not reach their copy.
+- **Sign-in required**: Public links can be viewed without an account when `ALLOW_SHARED_LINKS_PUBLIC=true`, but continuing always requires signing in.
+- **Files**: Files are only copied when the link includes file snapshots.
+- **Rate limits**: Continuing uses the same limits as [forking](/docs/features/fork) (`FORK_IP_MAX`, `FORK_USER_MAX`, and related variables in the [.env Configuration](/docs/configuration/dotenv)).
+
+To pass a conversation back and forth, each person can continue the copy they received and share their own link in return. Every hand-off creates a new, separate conversation.
 
 ## Branching
 
@@ -157,7 +170,12 @@ For the full environment variable reference, see the [.env Configuration](/docs/
 <Accordions type="single" collapsible>
 <Accordion title="Can recipients respond to shared conversations?">
 
-No. Shared links are read-only. Recipients can view the conversation but cannot add messages or interact with the AI.
+Not in the shared view, which is read-only. Signed-in recipients can select **Continue this chat** to copy the conversation into their own account and keep talking to the AI there. Their messages stay in their copy and never change yours. See [Continue a Shared Conversation](#continue-a-shared-conversation).
+
+</Accordion>
+<Accordion title="Can several users chat with the AI in the same conversation?">
+
+No. Each conversation in LibreChat belongs to one user, and there is no real-time group chat where multiple users take turns in a single conversation. Shared links are read-only snapshots, and **Continue this chat** gives each recipient a separate copy of their own.
 
 </Accordion>
 <Accordion title="What happens if I delete a conversation after sharing it?">
