@@ -10,9 +10,53 @@ const GITHUB_GRAPHQL = 'https://api.github.com/graphql'
 const MAX_MESSAGE_LENGTH = 2000
 const VALID_OPINIONS = new Set(['good', 'bad'])
 
-import { createRateLimiter } from '@/lib/rate-limit'
+import { headers } from 'next/headers'
+import { i18n } from '@/lib/i18n'
+import { checkFeedbackRateLimit } from '@/lib/ratelimit'
+import { docsSource } from '@/lib/source'
 
-const isRateLimited = createRateLimiter(3, 60_000)
+/**
+ * Resolve a submitted path to an existing docs page, dropping any query string
+ * or fragment. Returns the canonical path, or null when no such page exists, so
+ * callers cannot post feedback for arbitrary strings.
+ */
+function resolveDocsPath(url: string): string | null {
+  const path = url.split(/[?#]/, 1)[0] ?? ''
+  const parts = path.split('/').filter(Boolean)
+
+  let locale = i18n.defaultLanguage
+  const first = parts[0]
+  if (first && first !== 'docs' && i18n.languages.includes(first)) {
+    locale = first
+    parts.shift()
+  }
+  if (parts[0] !== 'docs') return null
+
+  const slugs = parts.slice(1)
+  if (!docsSource.getPage(slugs, locale)) return null
+
+  const prefix = locale === i18n.defaultLanguage ? '' : `/${locale}`
+  return `${prefix}/docs${slugs.length ? `/${slugs.join('/')}` : ''}`
+}
+
+/**
+ * Identify the client from headers set by the edge. Cloudflare fronts the site
+ * and overwrites cf-connecting-ip; x-real-ip and x-forwarded-for are set by Vercel.
+ */
+async function getClientId(): Promise<string> {
+  const h = await headers()
+  return (
+    h.get('cf-connecting-ip')?.trim() ||
+    h.get('x-real-ip')?.trim() ||
+    h.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    'unknown'
+  )
+}
+
+/** Break @mentions so a submitted message cannot notify GitHub users. */
+function escapeMentions(text: string): string {
+  return text.replaceAll('@', '@\u200b')
+}
 
 /**
  * Validate and sanitize the feedback payload.
@@ -28,8 +72,10 @@ function validatePayload(
   // Opinion must be exactly 'good' or 'bad'
   if (typeof opinion !== 'string' || !VALID_OPINIONS.has(opinion)) return null
 
-  // URL must be a relative docs path (no external URLs / open redirect)
+  // URL must resolve to an existing docs page (no external URLs, no arbitrary keys)
   if (typeof url !== 'string' || !url.startsWith('/') || url.includes('//')) return null
+  const docsPath = resolveDocsPath(url.slice(0, 500))
+  if (!docsPath) return null
 
   // Message is optional but must be a string with bounded length
   const safeMessage = typeof message === 'string' ? message.slice(0, MAX_MESSAGE_LENGTH).trim() : ''
@@ -37,7 +83,7 @@ function validatePayload(
   return {
     opinion: opinion as 'good' | 'bad',
     message: safeMessage,
-    url: url.slice(0, 500),
+    url: docsPath,
   }
 }
 
@@ -53,7 +99,7 @@ async function createGitHubDiscussion(payload: FeedbackPayload): Promise<void> {
   const body = [
     `**Page:** ${payload.url}`,
     `**Rating:** ${payload.opinion}`,
-    payload.message ? `**Message:**\n${payload.message}` : '',
+    payload.message ? `**Message:**\n${escapeMentions(payload.message)}` : '',
     `---`,
     `*Submitted via docs feedback widget*`,
   ]
@@ -110,7 +156,7 @@ async function postToDiscord(payload: FeedbackPayload): Promise<void> {
   const res = await fetch(webhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ embeds: [embed] }),
+    body: JSON.stringify({ embeds: [embed], allowed_mentions: { parse: [] } }),
   })
 
   if (!res.ok) {
@@ -127,8 +173,8 @@ export async function submitFeedback(raw: FeedbackPayload): Promise<{ success: b
       return { success: false }
     }
 
-    // Rate limit by validated URL to prevent spamming the same page
-    if (isRateLimited(payload.url)) {
+    // Rate limit by client, plus a global cap, so varying the URL cannot reset the limit
+    if (!(await checkFeedbackRateLimit(await getClientId()))) {
       return { success: false }
     }
 
